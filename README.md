@@ -81,7 +81,8 @@ Run both `tailscale up` and `tailscale serve`:
     "PackageConfig": {
         "github.com/tho/gokrazy-cmdgroup/cmd/cmdgroup": {
             "CommandLineFlags": [
-                "-name", "/user/tailscale",
+                "-name",
+                "/user/tailscale",
                 "--",
                 "up",
                 "--ssh",
