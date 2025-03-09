@@ -42,17 +42,15 @@ Configure it with command line flags:
 "PackageConfig": {
     "github.com/tho/gokrazy-cmdgroup/cmd/cmdgroup": {
         "CommandLineFlags": [
-            "-name", "command",
+            "-name",
+            "command",
             "--",
             "arg1",
             "-flag1",
             "--",
             "arg2",
-	    "-arg2"
-        ],
-        "ExtraFilePaths": {
-            "/etc/tailscale/auth_key": "tailscale.auth_key"
-        }
+	    "-flag2"
+        ]
     }
 }
 ```
@@ -85,7 +83,6 @@ Run both `tailscale up` and `tailscale serve`:
                 "/user/tailscale",
                 "--",
                 "up",
-                "--ssh",
                 "--auth-key=file:/etc/tailscale/auth_key",
                 "--",
                 "serve",
@@ -100,5 +97,6 @@ Run both `tailscale up` and `tailscale serve`:
 ```
 
 This runs two instances:
-1. `tailscale up --ssh --auth-key=file:/etc/tailscale/auth_key`
+
+1. `tailscale up --auth-key=file:/etc/tailscale/auth_key`
 2. `tailscale serve text:hello`
