@@ -152,30 +152,33 @@ func checkErr(err error) error {
 
 // Run executes this command instance, potentially restarting it if configured to watch.
 func (i *Instance) Run(ctx context.Context) error {
+	var err error
+
 	for {
 		cmd := i.newCmd(ctx)
+		cmdLogger := i.logger.With("cmd", cmd.String())
 
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("start command: %w", err)
-		}
-
-		cmdLogger := i.logger.With("cmd", cmd.String(), "pid", cmd.Process.Pid)
-		cmdLogger.Info("started")
-
-		if err := cmd.Wait(); err != nil {
-			cmdLogger.Info("exited", "reason", err)
+		if err = cmd.Start(); err != nil {
+			i.logger.Error("start command", "error", err)
 		} else {
-			cmdLogger.Info("exited")
+			cmdLogger = cmdLogger.With("pid", cmd.Process.Pid)
+			cmdLogger.Info("started")
+
+			if err = cmd.Wait(); err != nil {
+				cmdLogger.Info("exited", "reason", err)
+			} else {
+				cmdLogger.Info("exited")
+			}
 		}
 
 		if !i.Watch {
-			return nil
+			return err
 		}
 
 		select {
 		case <-ctx.Done():
 			cmdLogger.Info("not restarting", "reason", ctx.Err())
-			return nil
+			return ctx.Err()
 		case <-time.After(time.Second):
 			cmdLogger.Info("restarting")
 		}
