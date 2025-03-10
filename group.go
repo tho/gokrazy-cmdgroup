@@ -164,9 +164,9 @@ func (i *Instance) Run(ctx context.Context) error {
 
 		if err := cmd.Wait(); err != nil {
 			cmdLogger.Info("exited", "reason", err)
-			return fmt.Errorf("execute command: %w", err)
+		} else {
+			cmdLogger.Info("exited")
 		}
-		cmdLogger.Info("exited")
 
 		if !i.Watch {
 			return nil
