@@ -1,66 +1,52 @@
-package cmdgroup
+package main
 
 import (
 	"fmt"
+	"iter"
+	"slices"
 	"strconv"
 	"strings"
 )
 
-// parseArgs splits the provided arguments into separate command instances
-// based on "--" delimiters.
-func parseArgs(args []string) []*Instance {
-	var instances []*Instance
-	var start, end int
-
-	for end < len(args) {
-		if args[end] == "--" {
-			instances = append(instances, &Instance{
-				Args: args[start:end],
-			})
-			start = end + 1
-		}
-		end++
-	}
-
-	instances = append(instances, &Instance{
-		Args: args[start:end],
-	})
-
-	return instances
+// parseArgs splits arguments into sections on "--" delimiters.
+func parseArgs(args []string) [][]string {
+	return slices.Collect(slicesSplitSeq(args, "--"))
 }
 
-// parseInts converts watch specification to instance indexes.
-// Accepts "none", "all", or comma-separated indexes.
-func parseInts(watch string, maxValue int) ([]int, error) {
-	ints := make([]int, 0)
-
-	if watch == "" || watch == "none" {
-		return ints, nil
-	}
-
-	if watch == "all" {
-		for val := range maxValue {
-			ints = append(ints, val)
+// slicesSplitSeq returns an iterator over sub-slices of s split around the
+// separator element. It behaves like [strings.SplitSeq] but operates on slices
+// of a comparable type.
+func slicesSplitSeq[E comparable](s []E, sep E) iter.Seq[[]E] {
+	return func(yield func([]E) bool) {
+		start := 0
+		for i, v := range s {
+			if v == sep {
+				if !yield(s[start:i]) {
+					return
+				}
+				start = i + 1
+			}
 		}
-		return ints, nil
+		yield(s[start:])
 	}
+}
 
-	for indexStr := range strings.SplitSeq(watch, ",") {
-		indexStr = strings.TrimSpace(indexStr)
-		if indexStr == "" {
+// parseInts parses a comma-separated list of integers.
+func parseInts(s string) ([]int, error) {
+	var ints []int
+
+	for part := range strings.SplitSeq(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
 			continue
 		}
 
-		index, err := strconv.Atoi(indexStr)
+		n, err := strconv.Atoi(part)
 		if err != nil {
 			return nil, fmt.Errorf("parse int: %w", err)
 		}
 
-		if index < 0 || index >= maxValue {
-			return nil, fmt.Errorf("index out of range: %d", index)
-		}
-
-		ints = append(ints, index)
+		ints = append(ints, n)
 	}
 
 	return ints, nil

@@ -1,4 +1,4 @@
-package cmdgroup
+package main
 
 import (
 	"context"
@@ -13,35 +13,42 @@ import (
 	"time"
 )
 
-// cmdWaitDelay is how long to wait for an instance to exit after SIGTERM.
-// After this time, the process is killed.
-const cmdWaitDelay = 10 * time.Second
+type (
+	// Group manages multiple command instances.
+	Group struct {
+		Instances []*Instance
 
-// Group manages multiple command instances.
-type Group struct {
-	Instances []*Instance
+		logger *slog.Logger
+	}
 
-	logger *slog.Logger
-}
+	// Instance represents a single command execution with its configuration.
+	Instance struct {
+		Name   string
+		Args   []string
+		Watch  bool
+		Logger *slog.Logger
+	}
 
-// Instance represents a single command execution with its configuration.
-type Instance struct {
-	Name  string
-	Args  []string
-	Watch bool
+	// Options holds configuration for creating a new group.
+	Options struct {
+		args   []string
+		watch  string
+		logger *slog.Logger
+	}
 
-	logger *slog.Logger
-}
+	// Option is a functional option for configuring a group.
+	Option func(*Options)
+)
 
-// Options holds configuration for creating a new group.
-type Options struct {
-	args   []string
-	watch  string
-	logger *slog.Logger
-}
+const (
+	// cmdRestartDelay is how long to wait before restarting a watched
+	// instance.
+	cmdRestartDelay = time.Second
 
-// Option is a functional option for configuring a group.
-type Option func(*Options)
+	// cmdWaitDelay is how long to wait for an instance to exit after
+	// SIGTERM.  After this time, the process is killed.
+	cmdWaitDelay = 10 * time.Second
+)
 
 // WithArgs sets the command arguments for the group.
 func WithArgs(args []string) Option {
@@ -65,14 +72,21 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 // New creates a command group for the specified command name and options.
+// Arguments before the first "--" separator are global args prepended to every
+// instance. Each "--"-delimited section after that defines a separate instance.
+// If no "--" separators are present, a single instance receives all arguments.
 // By default, no instances are watched and no logging is performed.
 func New(name string, options ...Option) (*Group, error) {
 	opts := &Options{
+		args:   nil,
 		watch:  "none",
 		logger: slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(opts)
+	}
+	if opts.logger == nil {
+		return nil, errors.New("nil logger")
 	}
 
 	path, err := exec.LookPath(name)
@@ -80,23 +94,62 @@ func New(name string, options ...Option) (*Group, error) {
 		return nil, fmt.Errorf("look path: %w", err)
 	}
 
-	instances := parseArgs(opts.args)
-
-	watchIndexes, err := parseInts(opts.watch, len(instances))
-	if err != nil {
-		return nil, fmt.Errorf("parse watch: %w", err)
+	var (
+		instances  []*Instance
+		args       = parseArgs(opts.args)
+		globalArgs = args[0]
+	)
+	for _, args := range args[1:] {
+		instances = append(instances, &Instance{
+			Name:   path,
+			Args:   slices.Concat(globalArgs, args),
+			Watch:  false,
+			Logger: opts.logger,
+		})
+	}
+	if len(instances) == 0 {
+		instances = append(instances, &Instance{
+			Name:   path,
+			Args:   globalArgs,
+			Watch:  false,
+			Logger: opts.logger,
+		})
 	}
 
-	for index, instance := range instances {
-		instance.Name = path
-		instance.logger = opts.logger
-
-		if slices.Contains(watchIndexes, index) {
-			instances[index].Watch = true
-		}
+	if err := applyWatch(instances, opts.watch); err != nil {
+		return nil, err
 	}
 
 	return &Group{Instances: instances, logger: opts.logger}, nil
+}
+
+// applyWatch configures which instances should be monitored and restarted.
+func applyWatch(instances []*Instance, watch string) error {
+	switch watch {
+	case "", "none":
+		return nil
+	case "all":
+		for i := range instances {
+			instances[i].Watch = true
+		}
+
+		return nil
+	default:
+		indexes, err := parseInts(watch)
+		if err != nil {
+			return fmt.Errorf("parse watch: %w", err)
+		}
+
+		for _, index := range indexes {
+			if index < 0 || index >= len(instances) {
+				return fmt.Errorf("parse watch: index out of range: %d", index)
+			}
+
+			instances[index].Watch = true
+		}
+
+		return nil
+	}
 }
 
 // Run executes all command instances in parallel and waits for them to complete.
@@ -108,14 +161,12 @@ func (g *Group) Run(ctx context.Context) error {
 	)
 
 	for _, instance := range g.Instances {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := instance.Run(ctx)
 			mu.Lock()
-			errs = errors.Join(errs, checkErr(err))
+			errs = errors.Join(errs, CheckErr(err))
 			mu.Unlock()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -123,8 +174,8 @@ func (g *Group) Run(ctx context.Context) error {
 	return errs
 }
 
-// checkErr filters out expected termination errors (context cancel, SIGTERM).
-func checkErr(err error) error {
+// CheckErr filters out expected termination errors (context cancel, SIGTERM).
+func CheckErr(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -150,25 +201,26 @@ func checkErr(err error) error {
 	return nil
 }
 
-// Run executes this command instance, potentially restarting it if configured to watch.
+// Run executes this command instance, potentially restarting it if configured
+// to watch.
 func (i *Instance) Run(ctx context.Context) error {
 	var err error
 
 	for {
 		cmd := i.newCmd(ctx)
-		cmdLogger := i.logger.With("cmd", cmd.String())
+		cmdLogger := i.Logger.With("cmd", cmd.String())
 
 		if err = cmd.Start(); err != nil {
-			i.logger.Error("start command", "error", err)
-		} else {
-			cmdLogger = cmdLogger.With("pid", cmd.Process.Pid)
-			cmdLogger.Info("started")
+			return fmt.Errorf("start command: %w", err)
+		}
 
-			if err = cmd.Wait(); err != nil {
-				cmdLogger.Info("exited", "reason", err)
-			} else {
-				cmdLogger.Info("exited")
-			}
+		cmdLogger = cmdLogger.With("pid", cmd.Process.Pid)
+		cmdLogger.InfoContext(ctx, "started")
+
+		if err = cmd.Wait(); err != nil {
+			cmdLogger.ErrorContext(ctx, "exited", "reason", err)
+		} else {
+			cmdLogger.InfoContext(ctx, "exited")
 		}
 
 		if !i.Watch {
@@ -177,15 +229,15 @@ func (i *Instance) Run(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			cmdLogger.Info("not restarting", "reason", ctx.Err())
+			cmdLogger.InfoContext(ctx, "not restarting", "reason", ctx.Err())
 			return ctx.Err()
-		case <-time.After(time.Second):
-			cmdLogger.Info("restarting")
+		case <-time.After(cmdRestartDelay):
+			cmdLogger.InfoContext(ctx, "restarting")
 		}
 	}
 }
 
-// newCmd creates a new exec.Cmd with process group handling for clean termination.
+// newCmd creates a new [exec.Cmd] with process group handling for clean termination.
 func (i *Instance) newCmd(ctx context.Context) *exec.Cmd {
 	// #nosec G204 -- user/caller is responsible for name and args
 	cmd := exec.CommandContext(ctx, i.Name, i.Args...)

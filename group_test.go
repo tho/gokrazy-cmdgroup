@@ -1,91 +1,334 @@
-package cmdgroup_test
+package main_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"log/slog"
 	"os/exec"
-	"strconv"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	cmdgroup "github.com/tho/gokrazy-cmdgroup"
 )
 
+// TestNew tests creating a new Group with various options.
 func TestNew(t *testing.T) {
 	t.Parallel()
 
-	name := "echo"
-	path, err := exec.LookPath(name)
+	cmdName := "echo"
+	cmdPath, err := exec.LookPath(cmdName)
 	require.NoError(t, err)
+	discardLogger := slog.New(slog.DiscardHandler)
 
-	tests := []struct {
-		name          string
+	tests := map[string]struct {
+		cmdName       string
 		options       []cmdgroup.Option
 		wantInstances []*cmdgroup.Instance
 		wantErr       assert.ErrorAssertionFunc
 	}{
-		{
-			name:    "",
-			options: nil,
+		"empty command name": {
+			cmdName: "",
 			wantErr: assert.Error,
 		},
-		{
-			name:    name,
+		"invalid watch value": {
+			cmdName: cmdName,
 			options: []cmdgroup.Option{cmdgroup.WithWatch("a")},
 			wantErr: assert.Error,
 		},
-		{
-			name:          name,
-			options:       nil,
-			wantInstances: []*cmdgroup.Instance{{Name: path}},
-			wantErr:       assert.NoError,
+		"nil logger": {
+			cmdName:       cmdName,
+			options:       []cmdgroup.Option{cmdgroup.WithLogger(nil)},
+			wantInstances: nil,
+			wantErr:       assert.Error,
 		},
-		{
-			name: name,
-			options: []cmdgroup.Option{
-				cmdgroup.WithArgs([]string{"arg1", "-flag1", "--", "arg2", "-flag2"}),
-				cmdgroup.WithWatch("none"),
-			},
+		"nil options": {
+			cmdName: cmdName,
+			options: nil,
 			wantInstances: []*cmdgroup.Instance{
-				{Name: path, Args: []string{"arg1", "-flag1"}, Watch: false},
-				{Name: path, Args: []string{"arg2", "-flag2"}, Watch: false},
+				{Name: cmdPath, Args: nil, Logger: discardLogger},
 			},
 			wantErr: assert.NoError,
 		},
-		{
-			name: name,
+		"single instance with args": {
+			cmdName: cmdName,
+			options: []cmdgroup.Option{cmdgroup.WithArgs([]string{"arg1", "-flag1"})},
+			wantInstances: []*cmdgroup.Instance{
+				{Name: cmdPath, Args: []string{"arg1", "-flag1"}, Logger: discardLogger},
+			},
+			wantErr: assert.NoError,
+		},
+		"two instances no global args": {
+			cmdName: cmdName,
 			options: []cmdgroup.Option{
-				cmdgroup.WithArgs([]string{"arg1", "-flag1", "--", "arg2", "-flag2"}),
+				cmdgroup.WithArgs([]string{"--", "arg1", "-flag1", "--", "arg2", "-flag2"}),
+			},
+			wantInstances: []*cmdgroup.Instance{
+				{Name: cmdPath, Args: []string{"arg1", "-flag1"}, Logger: discardLogger},
+				{Name: cmdPath, Args: []string{"arg2", "-flag2"}, Logger: discardLogger},
+			},
+			wantErr: assert.NoError,
+		},
+		"two instances with global args": {
+			cmdName: cmdName,
+			options: []cmdgroup.Option{
+				cmdgroup.WithArgs([]string{"-v", "--", "arg1", "--", "arg2"}),
 				cmdgroup.WithWatch("all"),
 			},
 			wantInstances: []*cmdgroup.Instance{
-				{Name: path, Args: []string{"arg1", "-flag1"}, Watch: true},
-				{Name: path, Args: []string{"arg2", "-flag2"}, Watch: true},
+				{Name: cmdPath, Args: []string{"-v", "arg1"}, Watch: true, Logger: discardLogger},
+				{Name: cmdPath, Args: []string{"-v", "arg2"}, Watch: true, Logger: discardLogger},
 			},
 			wantErr: assert.NoError,
 		},
-		{
-			name: name,
+		"watch selective": {
+			cmdName: cmdName,
 			options: []cmdgroup.Option{
-				cmdgroup.WithArgs([]string{"arg1", "-flag1", "--", "arg2", "-flag2"}),
+				cmdgroup.WithArgs([]string{"--", "arg1", "-flag1", "--", "arg2", "-flag2"}),
 				cmdgroup.WithWatch("1"),
 			},
 			wantInstances: []*cmdgroup.Instance{
-				{Name: path, Args: []string{"arg1", "-flag1"}, Watch: false},
-				{Name: path, Args: []string{"arg2", "-flag2"}, Watch: true},
+				{Name: cmdPath, Args: []string{"arg1", "-flag1"}, Watch: false, Logger: discardLogger},
+				{Name: cmdPath, Args: []string{"arg2", "-flag2"}, Watch: true, Logger: discardLogger},
 			},
 			wantErr: assert.NoError,
 		},
+		"watch index out of range": {
+			cmdName: cmdName,
+			options: []cmdgroup.Option{
+				cmdgroup.WithArgs([]string{"--", "arg1", "--", "arg2"}),
+				cmdgroup.WithWatch("2"),
+			},
+			wantErr: assert.Error,
+		},
+		"watch negative index": {
+			cmdName: cmdName,
+			options: []cmdgroup.Option{
+				cmdgroup.WithArgs([]string{"--", "arg1", "--", "arg2"}),
+				cmdgroup.WithWatch("-1"),
+			},
+			wantErr: assert.Error,
+		},
 	}
 
-	for index, test := range tests {
-		t.Run(strconv.Itoa(index), func(t *testing.T) {
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			group, err := cmdgroup.New(test.name, test.options...)
-			test.wantErr(t, err)
+			group, err := cmdgroup.New(tt.cmdName, tt.options...)
+			tt.wantErr(t, err)
 			if group != nil {
-				assert.EqualExportedValues(t, test.wantInstances, group.Instances)
+				assert.Equal(t, tt.wantInstances, group.Instances)
 			}
+		})
+	}
+}
+
+// TestGroupRun tests running a Group of instances.
+func TestGroupRun(t *testing.T) {
+	t.Parallel()
+
+	truePath, err := exec.LookPath("true")
+	require.NoError(t, err)
+	falsePath, err := exec.LookPath("false")
+	require.NoError(t, err)
+
+	logger := slog.New(slog.DiscardHandler)
+
+	tests := map[string]struct {
+		instances []*cmdgroup.Instance
+		wantErr   assert.ErrorAssertionFunc
+	}{
+		"all succeed": {
+			instances: []*cmdgroup.Instance{
+				{Name: truePath, Logger: logger},
+				{Name: truePath, Logger: logger},
+			},
+			wantErr: assert.NoError,
+		},
+		"one fails": {
+			instances: []*cmdgroup.Instance{
+				{Name: truePath, Logger: logger},
+				{Name: falsePath, Logger: logger},
+			},
+			wantErr: assert.Error,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			group := &cmdgroup.Group{Instances: tt.instances}
+			err := group.Run(t.Context())
+			tt.wantErr(t, err)
+		})
+	}
+}
+
+// TestInstanceRun tests running a single Instance.
+func TestInstanceRun(t *testing.T) {
+	t.Parallel()
+
+	truePath, err := exec.LookPath("true")
+	require.NoError(t, err)
+	falsePath, err := exec.LookPath("false")
+	require.NoError(t, err)
+	sleepPath, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		cmdPath         string
+		args            []string
+		watch           bool
+		ctx             func(*testing.T) context.Context
+		wantErr         require.ErrorAssertionFunc
+		wantErrIs       error
+		wantErrContains string
+		wantLog         string
+	}{
+		"unwatched success": {
+			cmdPath: truePath,
+			wantErr: require.NoError,
+		},
+		"unwatched failure": {
+			cmdPath: falsePath,
+			wantErr: require.Error,
+		},
+		"start error": {
+			cmdPath:         "/nonexistent/binary",
+			wantErr:         require.Error,
+			wantErrContains: "start command",
+		},
+		"watched restarts": {
+			cmdPath: truePath,
+			watch:   true,
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+				ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
+				t.Cleanup(cancel)
+
+				return ctx
+			},
+			wantErr:   require.Error,
+			wantErrIs: context.DeadlineExceeded,
+			wantLog:   "msg=restarting",
+		},
+		"watched context cancel stops restart": {
+			cmdPath: sleepPath,
+			args:    []string{"60"},
+			watch:   true,
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+				ctx, cancel := context.WithCancel(t.Context())
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					cancel()
+				}()
+
+				return ctx
+			},
+			wantErr:   require.Error,
+			wantErrIs: context.Canceled,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			logger := slog.New(slog.DiscardHandler)
+			if tt.wantLog != "" {
+				logger = slog.New(slog.NewTextHandler(&buf, nil))
+			}
+
+			instance := &cmdgroup.Instance{
+				Name:   tt.cmdPath,
+				Args:   tt.args,
+				Watch:  tt.watch,
+				Logger: logger,
+			}
+
+			ctx := t.Context()
+			if tt.ctx != nil {
+				ctx = tt.ctx(t)
+			}
+
+			err := instance.Run(ctx)
+			tt.wantErr(t, err)
+
+			if tt.wantErrIs != nil {
+				require.ErrorIs(t, err, tt.wantErrIs)
+			}
+			if tt.wantErrContains != "" {
+				require.ErrorContains(t, err, tt.wantErrContains)
+			}
+			if tt.wantLog != "" {
+				require.Contains(t, buf.String(), tt.wantLog)
+			}
+		})
+	}
+}
+
+// TestCheckErr tests error classification for process exit errors.
+func TestCheckErr(t *testing.T) {
+	t.Parallel()
+
+	// signalErr returns an error from a process killed by the given signal.
+	signalErr := func(sig syscall.Signal) func(*testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
+			cmd := exec.CommandContext(t.Context(), "sleep", "60")
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			if err := cmd.Process.Signal(sig); err != nil {
+				t.Fatalf("signal: %v", err)
+			}
+
+			return cmd.Wait()
+		}
+	}
+
+	tests := map[string]struct {
+		err     func(*testing.T) error
+		wantErr assert.ErrorAssertionFunc
+	}{
+		"nil": {
+			err:     func(*testing.T) error { return nil },
+			wantErr: assert.NoError,
+		},
+		"context canceled": {
+			err:     func(*testing.T) error { return context.Canceled },
+			wantErr: assert.NoError,
+		},
+		"non-exit error": {
+			err:     func(*testing.T) error { return errors.New("some error") },
+			wantErr: assert.Error,
+		},
+		"exit code": {
+			err: func(t *testing.T) error {
+				t.Helper()
+				return exec.CommandContext(t.Context(), "false").Run()
+			},
+			wantErr: assert.Error,
+		},
+		"sigterm": {
+			err:     signalErr(syscall.SIGTERM),
+			wantErr: assert.NoError,
+		},
+		"sigkill": {
+			err:     signalErr(syscall.SIGKILL),
+			wantErr: assert.Error,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			tt.wantErr(t, cmdgroup.CheckErr(tt.err(t)))
 		})
 	}
 }
