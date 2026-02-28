@@ -33,7 +33,7 @@ linters:
     fatcontext:
       check-struct-pointers: true
     funcorder:
-      alpabetical: true
+      alphabetical: true
     gocritic:
       enable-all: true
     godoclint:
