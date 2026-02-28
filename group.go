@@ -152,12 +152,18 @@ func applyWatch(instances []*Instance, watch string) error {
 
 // Run executes all command instances in parallel and waits for them to complete.
 func (g *Group) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	var wg sync.WaitGroup
 
 	errs := make([]error, len(g.Instances))
 	for idx, instance := range g.Instances {
 		wg.Go(func() {
 			errs[idx] = checkErr(instance.Run(ctx))
+			if errs[idx] != nil && !instance.Watch {
+				cancel(errs[idx])
+			}
 		})
 	}
 

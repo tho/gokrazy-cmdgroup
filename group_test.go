@@ -133,6 +133,8 @@ func TestGroupRun(t *testing.T) {
 	require.NoError(t, err)
 	falsePath, err := exec.LookPath("false")
 	require.NoError(t, err)
+	sleepPath, err := exec.LookPath("sleep")
+	require.NoError(t, err)
 
 	logger := slog.New(slog.DiscardHandler)
 
@@ -151,6 +153,13 @@ func TestGroupRun(t *testing.T) {
 			instances: []*cmdgroup.Instance{
 				{Name: truePath, Logger: logger},
 				{Name: falsePath, Logger: logger},
+			},
+			wantErr: assert.Error,
+		},
+		"unwatched failure cancels watched instance": {
+			instances: []*cmdgroup.Instance{
+				{Name: falsePath, Logger: logger},
+				{Name: sleepPath, Args: []string{"60"}, Watch: true, Logger: logger},
 			},
 			wantErr: assert.Error,
 		},

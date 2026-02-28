@@ -33,15 +33,15 @@ func run(ctx context.Context, args []string) int {
 		return gokrazyDoNotSuperviseExitCode
 	}
 
-	positional := flagSet.Args()
-	if len(positional) == 0 {
+	positionalArgs := flagSet.Args()
+	if len(positionalArgs) == 0 {
 		logger.ErrorContext(ctx, "no command specified")
 		return gokrazyDoNotSuperviseExitCode
 	}
 
 	group, err := New(
-		positional[0],
-		WithArgs(positional[1:]),
+		positionalArgs[0],
+		WithArgs(positionalArgs[1:]),
 		WithWatch(*watch),
 		WithLogger(logger),
 	)
