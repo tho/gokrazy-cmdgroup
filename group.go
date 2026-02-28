@@ -95,7 +95,7 @@ func New(name string, options ...Option) (*Group, error) {
 	var (
 		instances  []*Instance
 		args       = parseArgs(opts.args)
-		globalArgs = args[0]
+		globalArgs = args[0] // parseArgs always returns at least one element
 	)
 	for _, args := range args[1:] {
 		instances = append(instances, &Instance{
@@ -152,24 +152,18 @@ func applyWatch(instances []*Instance, watch string) error {
 
 // Run executes all command instances in parallel and waits for them to complete.
 func (g *Group) Run(ctx context.Context) error {
-	var (
-		wg   sync.WaitGroup
-		mu   sync.Mutex
-		errs error
-	)
+	var wg sync.WaitGroup
 
-	for _, instance := range g.Instances {
+	errs := make([]error, len(g.Instances))
+	for idx, instance := range g.Instances {
 		wg.Go(func() {
-			err := instance.Run(ctx)
-			mu.Lock()
-			errs = errors.Join(errs, checkErr(err))
-			mu.Unlock()
+			errs[idx] = checkErr(instance.Run(ctx))
 		})
 	}
 
 	wg.Wait()
 
-	return errs
+	return errors.Join(errs...)
 }
 
 // checkErr filters out expected termination errors (context cancel, SIGTERM).

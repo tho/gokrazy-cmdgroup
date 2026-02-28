@@ -51,8 +51,6 @@ linters:
         - unused
         - opaque
         - unexported
-    makezero:
-      always: true
     nilnil:
       detect-opposite: true
     nlreturn:
