@@ -50,7 +50,7 @@ Run both `tailscale up` and `tailscale serve` on a single gokrazy instance:
         "github.com/tho/gokrazy-cmdgroup": {
             "CommandLineFlags": [
                 "-watch", "1",
-                "tailscale",
+                "/user/tailscale",
                 "--", "up", "--auth-key=file:/etc/tailscale/auth_key",
                 "--", "serve", "text:hello"
             ],
