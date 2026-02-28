@@ -1,0 +1,128 @@
+# Golangci-lint configuration file
+# https://golangci-lint.run
+version: "2"
+
+linters:
+  default: all
+  disable:
+    - exhaustruct
+    - noinlineerr
+    - tagalign
+    - varnamelen
+    - wsl
+    - wsl_v5
+  settings:
+    copyloopvar:
+      check-alias: true
+    decorder:
+      disable-dec-order-check: false
+      disable-dec-num-check: false
+    depguard:
+      rules:
+        main:
+          allow:
+            - $gostd
+            - github.com/stretchr
+            - github.com/tho
+    embeddedstructfieldcheck:
+      empty-line: true
+      forbid-mutex: true
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    fatcontext:
+      check-struct-pointers: true
+    funcorder:
+      alpabetical: true
+    gocritic:
+      enable-all: true
+    godoclint:
+      default: all
+      options:
+        max-len:
+          length: 117
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    iface:
+      enable:
+        - identical
+        - unused
+        - opaque
+        - unexported
+    makezero:
+      always: true
+    nilnil:
+      detect-opposite: true
+    nlreturn:
+      block-size: 3
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      enable-all-rules: true
+      rules:
+        - name: add-constant
+          disabled: true
+        - name: cognitive-complexity
+          disabled: true
+        - name: function-length
+          disabled: true
+        - name: line-length-limit
+          disabled: true
+    sloglint:
+        no-global: "all"
+        context: "scope"
+        static-msg: true
+        key-naming-case: snake
+    staticcheck:
+      checks:
+        - all
+    testifylint:
+      enable-all: true
+    unconvert:
+      fast-math: true
+    usestdlibvars:
+      time-date-month: true
+      time-month: true
+      time-layout: true
+      crypto-hash: true
+      default-rpc-path: true
+      sql-isolation-level: true
+      tls-signature-scheme: true
+      constant-kind: true
+    usetesting:
+      context-background: true
+      context-todo: true
+      os-temp-dir: true
+    wrapcheck:
+      extra-ignore-sigs:
+        - (context.Context).Err(
+        - (*os/exec.Cmd).Wait()
+  exclusions:
+    warn-unused: true
+    rules:
+      # https://github.com/Djarvur/go-err113/issues/10
+      - linters:
+          - err113
+        text: "do not define dynamic errors"
+      - path: _test\.go
+        linters:
+          - funlen
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule
+    gofumpt:
+      extra-rules: true
+
+run:
+  modules-download-mode: readonly

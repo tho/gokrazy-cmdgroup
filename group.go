@@ -17,8 +17,6 @@ type (
 	// Group manages multiple command instances.
 	Group struct {
 		Instances []*Instance
-
-		logger *slog.Logger
 	}
 
 	// Instance represents a single command execution with its configuration.
@@ -64,7 +62,7 @@ func WithWatch(watch string) Option {
 	}
 }
 
-// WithLogger sets the logger for the group and its instances.
+// WithLogger sets the logger for all instances in the group.
 func WithLogger(logger *slog.Logger) Option {
 	return func(o *Options) {
 		o.logger = logger
@@ -120,7 +118,7 @@ func New(name string, options ...Option) (*Group, error) {
 		return nil, err
 	}
 
-	return &Group{Instances: instances, logger: opts.logger}, nil
+	return &Group{Instances: instances}, nil
 }
 
 // applyWatch configures which instances should be monitored and restarted.
@@ -164,7 +162,7 @@ func (g *Group) Run(ctx context.Context) error {
 		wg.Go(func() {
 			err := instance.Run(ctx)
 			mu.Lock()
-			errs = errors.Join(errs, CheckErr(err))
+			errs = errors.Join(errs, checkErr(err))
 			mu.Unlock()
 		})
 	}
@@ -174,8 +172,8 @@ func (g *Group) Run(ctx context.Context) error {
 	return errs
 }
 
-// CheckErr filters out expected termination errors (context cancel, SIGTERM).
-func CheckErr(err error) error {
+// checkErr filters out expected termination errors (context cancel, SIGTERM).
+func checkErr(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -206,9 +204,14 @@ func CheckErr(err error) error {
 func (i *Instance) Run(ctx context.Context) error {
 	var err error
 
+	logger := i.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+
 	for {
 		cmd := i.newCmd(ctx)
-		cmdLogger := i.Logger.With("cmd", cmd.String())
+		cmdLogger := logger.With("cmd", cmd.String())
 
 		if err = cmd.Start(); err != nil {
 			return fmt.Errorf("start command: %w", err)
