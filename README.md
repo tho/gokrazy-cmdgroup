@@ -10,7 +10,7 @@ Gokrazy's `PackageConfig` is keyed by package path, so you can only have one con
 gok add github.com/tho/gokrazy-cmdgroup
 ```
 
-Configure it in your gokrazy config. The first positional argument is the command to run, and `--` separates per-instance arguments:
+Configure it in your gokrazy config. The first positional argument is the command to run, and `--` separates per-instance arguments. Arguments before the first `--` are shared across all instances:
 
 ```json
 "PackageConfig": {
@@ -49,6 +49,7 @@ Run both `tailscale up` and `tailscale serve` on a single gokrazy instance:
     "PackageConfig": {
         "github.com/tho/gokrazy-cmdgroup": {
             "CommandLineFlags": [
+                "-watch", "1",
                 "tailscale",
                 "--", "up", "--auth-key=file:/etc/tailscale/auth_key",
                 "--", "serve", "text:hello"
@@ -61,7 +62,7 @@ Run both `tailscale up` and `tailscale serve` on a single gokrazy instance:
 }
 ```
 
-This runs two `tailscale` instances:
+This runs two `tailscale` instances, automatically restarting instance 1 (`serve`) if it exits:
 
 1. `tailscale up --auth-key=file:/etc/tailscale/auth_key`
 2. `tailscale serve text:hello`
