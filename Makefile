@@ -1,6 +1,6 @@
-.PHONY: check lint test vuln
+.PHONY: check integration lint test vuln
 
-check: vuln lint test
+check: vuln lint test integration
 
 vuln:
 	govulncheck ./...
@@ -10,3 +10,6 @@ lint:
 
 test:
 	go test -race ./...
+
+integration:
+	sh example_test.sh
