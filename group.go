@@ -151,6 +151,9 @@ func applyWatch(instances []*Instance, watch string) error {
 }
 
 // Run executes all command instances in parallel and waits for them to complete.
+// If an unwatched instance exits with an error, the group context is cancelled
+// and all remaining instances are terminated. Watched instances that exit with
+// an error (including a start failure) do not cancel the group.
 func (g *Group) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
