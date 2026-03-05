@@ -202,8 +202,6 @@ func checkErr(err error) error {
 // Run executes this command instance, potentially restarting it if configured
 // to watch.
 func (i *Instance) Run(ctx context.Context) error {
-	var err error
-
 	logger := i.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -213,14 +211,15 @@ func (i *Instance) Run(ctx context.Context) error {
 		cmd := i.newCmd(ctx)
 		cmdLogger := logger.With("cmd", cmd.String())
 
-		if err = cmd.Start(); err != nil {
+		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("start command: %w", err)
 		}
 
 		cmdLogger = cmdLogger.With("pid", cmd.Process.Pid)
 		cmdLogger.InfoContext(ctx, "started")
 
-		if err = cmd.Wait(); err != nil {
+		err := cmd.Wait()
+		if err != nil {
 			cmdLogger.ErrorContext(ctx, "exited", "reason", err)
 		} else {
 			cmdLogger.InfoContext(ctx, "exited")
