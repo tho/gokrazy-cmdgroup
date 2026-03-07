@@ -230,6 +230,7 @@ func TestInstanceRun(t *testing.T) {
 			ctx: func(t *testing.T) context.Context {
 				t.Helper()
 				ctx, cancel := context.WithCancel(t.Context())
+				t.Cleanup(cancel)
 				go func() {
 					time.Sleep(100 * time.Millisecond)
 					cancel()
