@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -58,7 +59,7 @@ func WithArgs(args []string) Option {
 // WithWatch sets which command instances should be monitored and restarted.
 func WithWatch(watch string) Option {
 	return func(o *Options) {
-		o.watch = watch
+		o.watch = cmp.Or(watch, "none")
 	}
 }
 
@@ -124,7 +125,7 @@ func New(name string, options ...Option) (*Group, error) {
 // applyWatch configures which instances should be monitored and restarted.
 func applyWatch(instances []*Instance, watch string) error {
 	switch watch {
-	case "", "none":
+	case "none":
 		return nil
 	case "all":
 		for i := range instances {
