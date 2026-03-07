@@ -1,9 +1,15 @@
-.PHONY: check integration lint test vuln
+.PHONY: check vuln fmt fmt-diff lint test integration
 
-check: vuln lint test integration
+check: vuln fmt-diff lint test integration
 
 vuln:
 	govulncheck ./...
+
+fmt:
+	golangci-lint fmt ./...
+
+fmt-diff:
+	golangci-lint fmt --diff ./...
 
 lint:
 	golangci-lint run
